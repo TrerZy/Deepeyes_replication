@@ -13,6 +13,7 @@ import base64
 import io
 from openai import OpenAI
 import requests
+import re
 
 
 parser = argparse.ArgumentParser()
@@ -171,6 +172,7 @@ def process(img_arg):
     status = 'success'
     try_count = 0
     turn_idx = 0
+    seen = set()
     try:
         while '</answer>' not in response_message:
             if '</answer>' in response_message and '<answer>' in response_message:
@@ -184,31 +186,41 @@ def process(img_arg):
                 "messages": chat_message,
                 "temperature": 0.0,
                 "max_tokens": 10240,
-                "stop": ["<|im_end|>\n".strip()],
+                "stop": ["</tool_call>\n".strip()],
             }
             response = client.chat.completions.create(**params)
             response_message = response.choices[0].message.content
             
             if start_token in response_message:
-                action_list = response_message.split(start_token)[1].split(end_token)[0].strip()
-                action_list = eval(action_list)
+                
+                if isinstance(response_message, str):
+                    response_message = response_message
+                elif isinstance(response_message, list):
+                    for _response_message in response_message:
+                        if _response_message['type'] == 'text':
+                            response_message = _response_message['text']
+                else:
+                    continue
+
+                pattern = r'\[\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*,\s*(\d+\.?\d*)\s*\]'
+                matches = re.findall(pattern, response_message)
 
                 bbox_list = []
                 cropped_pil_image_content_list = []
 
-                bbox_str = action_list['arguments']['bbox_2d']
-                bbox = bbox_str
-                left, top, right, bottom = bbox
-                cropped_image = pil_img.crop((left, top, right, bottom))
-                new_w, new_h = smart_resize((right - left), (bottom - top), factor=IMAGE_FACTOR)
-                cropped_image = cropped_image.resize((new_w, new_h), resample=Image.BICUBIC)
-                cropped_pil_image = encode_pil_image_to_base64(cropped_image)
-                bbox_list.append(bbox)
-                cropped_pil_image_content = {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{cropped_pil_image}"}}
-                cropped_pil_image_content_list.append(cropped_pil_image_content)
+                for match in matches:
+                    bbox = tuple(int(num) for num in match)
+                    if bbox not in seen:
+                        seen.add(bbox)
+                        bbox_list.append(list(bbox))
+                        left, top, right, bottom = bbox
+                        cropped_image = pil_img.crop((left, top, right, bottom))
+                        new_w, new_h = smart_resize((right - left), (bottom - top), factor=IMAGE_FACTOR)
+                        cropped_image = cropped_image.resize((new_w, new_h), resample=Image.BICUBIC)
+                        cropped_pil_image = encode_pil_image_to_base64(cropped_image)
+                        cropped_pil_image_content = {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{cropped_pil_image}"}}
+                        cropped_pil_image_content_list.append(cropped_pil_image_content)
 
-                if len(bbox_list) == 1:
-                    bbox_list = bbox_list[0]
                 user_msg = user_prompt
 
                 content_f = []

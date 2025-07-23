@@ -17,7 +17,7 @@ archspec==0.2.3
 astor==0.8.1
 asttokens==3.0.0
 attrs==24.2.0
-av==14.4.0
+av==15.0.0
 babel==2.16.0
 bitsandbytes==0.45.0
 blake3==1.0.1
